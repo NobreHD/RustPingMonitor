@@ -8,7 +8,7 @@ def clear():
     else:
         os.system("clear")
 
-def error_loop(msg) -> bool:
+def error_loop(msg: str) -> bool:
     while True:
         clear()
         print(msg)
@@ -18,26 +18,15 @@ def error_loop(msg) -> bool:
         if i == "":
             return True
 
-def is_valid_ip(ip, port) -> bool:
-    if not port.isdigit():
-        return False
-    port = int(port)
-    if port < 0 or port > 65535:
-        return False
-    for i in ip.split("."):
-        if not i.isdigit():
-            return False
-        ii = int(i)
-        if ii < 0 or ii > 255:
-            return False
-    return True
-
-def get_random_port():
+def get_random_port() -> int:
     return random.randint(64000, 65000)
 
+def ignorecase_equals(a: str, b: str) -> bool:
+    return a.lower() == b.lower()
+
 class Server:
-    def __init__(self, str_data):
-        split_data = re.split(",|\x01|\x00", str_data)
+    def __init__(self, data: str):
+        split_data = re.split(",|\x01|\x00", data)
         for i in range(0, len(split_data)):
             d = split_data[i]
             if i == 0:
@@ -56,11 +45,11 @@ class Server:
             return self.name == __value.name and self.map_generator == __value.map_generator and self.max_players == __value.max_players and self.current_players == __value.current_players and self.map_age == __value.map_age
         return False
 
-    def get_formatted_age(self):
+    def get_formatted_age(self) -> str:
         return FormatDelta(datetime.fromtimestamp(self.map_age)).format()
 
 class SocketClient:
-    def __init__(self, ip, port):
+    def __init__(self, ip: str, port: int):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.settimeout(1)
         self.socket.bind(("0.0.0.0", get_random_port()))
@@ -78,7 +67,7 @@ class SocketClient:
         return Server(self.send_packet(payload)[6:-9].decode("utf-8", errors="ignore"))
 
 class FormatDelta:    
-    def __init__(self, dt):
+    def __init__(self, dt: datetime):
         now = datetime.now()
         delta = now - dt
         self.day = delta.days
@@ -88,16 +77,16 @@ class FormatDelta:
         self.hour, self.second = self.qnr(self.second, 3600)
         self.minute, self.second = self.qnr(self.second, 60)
 
-    def formatn(self, n, s):
+    def formatn(self, n: int, s: str) -> str:
         if n == 1:
             return "1 %s" % s
-        elif n > 1:
+        else:
             return "%d %ss" % (n, s)
         
-    def qnr(self, a, b):
+    def qnr(self, a: int, b: int) -> tuple:
         return a / b, a % b
 
-    def format(self):
+    def format(self) -> str:
         for period in ['year', 'month', 'day', 'hour', 'minute', 'second']:
             n = getattr(self, period)
             if n > 1:
@@ -121,23 +110,31 @@ class Pager:
         else:
             self.save()
 
-    def add(self, name, ip, port):
+    def add(self, name: str, ip: str, port: int) -> dict:
         data = {"name": name, "ip": ip, "port": port}
         self.servers.append(data)
         self.save()
         return data
 
     def add_server(self):
-        while True:
-            clear()
-            name = input("Enter name: ")
-            ip = input("Enter IP: ")
-            port = input("Enter Query Port: ")
-            if(is_valid_ip(ip, port)):
+        try:
+            while True:
+                clear()
+                name = input("Enter name: ")
+                ip = input("Enter IP: ")
+                port = input("Enter Query Port: ")
+                if name == "" or ip == "" or port == "":
+                    if not error_loop("You must enter all fields!"):
+                        return None
+                    continue
+                if not port.isdigit():
+                    if not error_loop("Port must be a number!"):
+                        return None
+                    continue
+                port = int(port)
                 return self.add(name, ip, port)
-            else:
-                if not error_loop("Invalid IP or Port."):
-                    return None
+        except KeyboardInterrupt:
+            return None
 
     def gui(self):
         clear()
@@ -155,6 +152,8 @@ class Pager:
         print("0. Add Server")
         if self.page < len(self.servers) // 8:
             print("+. Next Page")
+        print()
+        print("x. Exit")
         print("Page {0}/{1}".format(self.page + 1, len(self.servers) // 8 + 1))
         print()
 
@@ -168,6 +167,8 @@ class Pager:
         if selector == "+":
             self.page += 1
             return None
+        if ignorecase_equals(selector, "x"):
+            exit()
         if selector.isdigit():
             try:
                 selector = int(selector)
