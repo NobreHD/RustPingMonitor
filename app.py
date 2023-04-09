@@ -184,15 +184,20 @@ class Pager:
         return None
 
     def gui_loop(self):
-        chosen = None
-        while chosen is None:
-            if len(self.servers) == 0:
-                chosen = self.add_server()
-                if chosen is None:
-                    exit()
-            self.gui()
-            chosen = self.gui_selector()
-        return chosen
+        try:
+            chosen = None
+            while chosen is None:
+                if len(self.servers) == 0:
+                    chosen = self.add_server()
+                    if chosen is None:
+                        exit()
+                self.gui()
+                chosen = self.gui_selector()
+            return chosen
+        except KeyboardInterrupt:
+            print()
+            print("Exiting...")
+            exit()
 
     def get_delay(self):
         while True:
@@ -240,7 +245,7 @@ def main():
                     print(f"   Players: {server_info.current_players}/{server_info.max_players}")
                     print()
             sleep(1)
-            points = (points + 1) % 5
+            points = (points + 1) % 6
             print("Loading" + "." * points + "      ", end="\r")
     except KeyboardInterrupt:
         print("Exiting...                ")
