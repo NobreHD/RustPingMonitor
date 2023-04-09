@@ -139,7 +139,7 @@ class Pager:
     def gui(self):
         clear()
         print()
-        print("{:=^50}".format(" Server Pager "))
+        print("{:=^50}".format(" Rust Ping Monitor "))
         print()
         for i in range(0, 8):
             try:
