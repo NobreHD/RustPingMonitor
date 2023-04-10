@@ -1,12 +1,10 @@
-import socket, re, random, os, json
+import socket, re, os, json
 from datetime import datetime
+from typing import Union
 from time import sleep
 
 def clear():
-    if os.name == "nt":
-        os.system("cls")
-    else:
-        os.system("clear")
+    os.system('cls' if os.name == 'nt' else 'clear')
 
 def error_loop(msg: str) -> bool:
     while True:
@@ -18,27 +16,28 @@ def error_loop(msg: str) -> bool:
         if i == "":
             return True
 
-def get_random_port() -> int:
-    return random.randint(64000, 65000)
-
 def ignorecase_equals(a: str, b: str) -> bool:
-    return a.lower() == b.lower()
+    return a.casefold() == b.casefold()
 
 class Server:
     def __init__(self, data: str):
-        split_data = re.split(",|\x01|\x00", data)
-        for i in range(0, len(split_data)):
-            d = split_data[i]
-            if i == 0:
-                self.name = d
-            elif i == 1:
-                self.map_generator = d
-            elif d.startswith("mp"):
-                self.max_players = int(d[2:])
-            elif d.startswith("cp"):
-                self.current_players = int(d[2:])
-            elif d.startswith("born"):
-                self.map_age = int(d[4:])
+        server_properties = re.split(",|\x01|\x00", data)
+        server_data = {}
+
+        for prop in server_properties:
+            if prop.startswith("mp"):
+                server_data["max_players"] = int(prop[2:])
+            elif prop.startswith("cp"):
+                server_data["current_players"] = int(prop[2:])
+            elif prop.startswith("born"):
+                server_data["map_age"] = int(prop[4:])
+            else:
+                if "name" not in server_data:
+                    server_data["name"] = prop
+                elif "map_generator" not in server_data:
+                    server_data["map_generator"] = prop
+
+        self.__dict__.update(server_data)
 
     def __eq__(self, __value: object) -> bool:
         if isinstance(__value, Server):
@@ -52,9 +51,12 @@ class SocketClient:
     def __init__(self, ip: str, port: int):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.settimeout(1)
-        self.socket.bind(("0.0.0.0", get_random_port()))
+        self.socket.bind(("0.0.0.0", 0))
         self.ip = ip
         self.port = port
+    
+    def get_bind_port(self) -> int:
+        return self.socket.getsockname()[1]
     
     def send_packet(self, packet: str) -> bytes:
         self.socket.sendto(bytes.fromhex(packet), (self.ip, self.port))
@@ -62,10 +64,12 @@ class SocketClient:
         return data
 
     def request_data(self) -> Server:
-        payload = "ffffffff54536f7572636520456e67696e6520517565727900"
-        payload += self.send_packet(payload).hex()[10:]
-        return Server(self.send_packet(payload)[6:-9].decode("utf-8", errors="ignore"))
-
+        try:
+            payload = "ffffffff54536f7572636520456e67696e6520517565727900"
+            payload += self.send_packet(payload).hex()[10:]
+            return Server(self.send_packet(payload)[6:-9].decode("utf-8", errors="ignore"))
+        except socket.timeout:
+            raise Exception("Server not found or unresponsive. Please check your IP and port.")
 class FormatDelta:    
     def __init__(self, dt: datetime):
         now = datetime.now()
@@ -84,7 +88,7 @@ class FormatDelta:
             return "%d %ss" % (n, s)
         
     def qnr(self, a: int, b: int) -> tuple:
-        return a / b, a % b
+        return divmod(a, b)
 
     def format(self) -> str:
         for period in ['year', 'month', 'day', 'hour', 'minute', 'second']:
@@ -116,7 +120,7 @@ class Pager:
         self.save()
         return data
 
-    def add_server(self):
+    def add_server(self) -> Union[dict, None]:
         try:
             while True:
                 clear()
@@ -248,7 +252,11 @@ def main():
             points = (points + 1) % 6
             print("Loading" + "." * points + "      ", end="\r")
     except KeyboardInterrupt:
-        print("Exiting...                ")
+        print("Exiting...       ")
+        exit()
+    except Exception as e:
+        print("An error has occurred: " + str(e))
+        print("Exiting...")
         exit()
 
 if __name__ == "__main__":
