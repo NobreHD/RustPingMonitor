@@ -1,263 +1,59 @@
-import socket, re, os, json
 from datetime import datetime
-from typing import Union
 from time import sleep
+from pager import Pager, clear, get_delay
+from socketclient import SocketClient
+import sys
 
-def clear():
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-def error_loop(msg: str) -> bool:
-    while True:
-        clear()
-        print(msg)
-        i = input("Press enter to try again or type 'exit' to exit: ")
-        if i.lower() == "exit":
-            return False
-        if i == "":
-            return True
-
-def ignorecase_equals(a: str, b: str) -> bool:
-    return a.casefold() == b.casefold()
-
-class Server:
-    def __init__(self, data: str):
-        server_properties = re.split(",|\x01|\x00", data)
-        server_data = {}
-
-        for prop in server_properties:
-            if prop.startswith("mp"):
-                server_data["max_players"] = int(prop[2:])
-            elif prop.startswith("cp"):
-                server_data["current_players"] = int(prop[2:])
-            elif prop.startswith("born"):
-                server_data["map_age"] = int(prop[4:])
-            else:
-                if "name" not in server_data:
-                    server_data["name"] = prop
-                elif "map_generator" not in server_data:
-                    server_data["map_generator"] = prop
-
-        self.__dict__.update(server_data)
-
-    def __eq__(self, __value: object) -> bool:
-        if isinstance(__value, Server):
-            return self.name == __value.name and self.map_generator == __value.map_generator and self.max_players == __value.max_players and self.current_players == __value.current_players and self.map_age == __value.map_age
-        return False
-
-    def get_formatted_age(self) -> str:
-        return FormatDelta(datetime.fromtimestamp(self.map_age)).format()
-
-class SocketClient:
-    def __init__(self, ip: str, port: int):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.settimeout(1)
-        self.socket.bind(("0.0.0.0", 0))
-        self.ip = ip
-        self.port = port
-    
-    def get_bind_port(self) -> int:
-        return self.socket.getsockname()[1]
-    
-    def send_packet(self, packet: str) -> bytes:
-        self.socket.sendto(bytes.fromhex(packet), (self.ip, self.port))
-        data, addr = self.socket.recvfrom(1024)
-        return data
-
-    def request_data(self) -> Server:
-        try:
-            payload = "ffffffff54536f7572636520456e67696e6520517565727900"
-            payload += self.send_packet(payload).hex()[10:]
-            return Server(self.send_packet(payload)[6:-9].decode("utf-8", errors="ignore"))
-        except socket.timeout:
-            raise Exception("Server not found or unresponsive. Please check your IP and port.")
-class FormatDelta:    
-    def __init__(self, dt: datetime):
-        now = datetime.now()
-        delta = now - dt
-        self.day = delta.days
-        self.second = delta.seconds
-        self.year, self.day = self.qnr(self.day, 365)
-        self.month, self.day = self.qnr(self.day, 30)
-        self.hour, self.second = self.qnr(self.second, 3600)
-        self.minute, self.second = self.qnr(self.second, 60)
-
-    def formatn(self, n: int, s: str) -> str:
-        if n == 1:
-            return "1 %s" % s
-        else:
-            return "%d %ss" % (n, s)
-        
-    def qnr(self, a: int, b: int) -> tuple:
-        return divmod(a, b)
-
-    def format(self) -> str:
-        for period in ['year', 'month', 'day', 'hour', 'minute', 'second']:
-            n = getattr(self, period)
-            if n > 1:
-                return '{0} ago'.format(self.formatn(n, period))
-        return "just now"
-
-class Pager:
+class ServerMonitor:
     def __init__(self):
-        self.servers = []
-        self.load()
-        self.page = 0
+        self.pager = Pager()
+        self.delay = 0
+        self.socket_client = None
+        self.last_server_info = None
+        self.last_time = datetime.now()
+        self.points = 0
 
-    def save(self):
-        with open("servers.json", "w") as f:
-            json.dump(self.servers, f)
+    def display_server_info(self, server_info, action):
+        ts = datetime.now().strftime("%H:%M:%S")
+        print(f"[{ts}] {action} server:")
+        if action != "Updated":
+            print(f"   Name: {server_info.name}")
+            print(f"   Map Generator: {server_info.map_generator}")
+            print(f"   Map Age: {server_info.get_formatted_age()}")
+        print(f"   Players: {server_info.current_players}/{server_info.max_players}")
+        print()
 
-    def load(self):
-        if os.path.exists("servers.json"):
-            with open("servers.json", "r") as f:
-                self.servers = json.load(f)
-        else:
-            self.save()
-
-    def add(self, name: str, ip: str, port: int) -> dict:
-        data = {"name": name, "ip": ip, "port": port}
-        self.servers.append(data)
-        self.save()
-        return data
-
-    def add_server(self) -> Union[dict, None]:
+    def run(self):
         try:
+            selected_server = self.pager.gui_loop()
+            self.delay = get_delay()
+            self.socket_client = SocketClient(selected_server["ip"], selected_server["port"])
+            clear()
+
             while True:
-                clear()
-                name = input("Enter name: ")
-                ip = input("Enter IP: ")
-                port = input("Enter Query Port: ")
-                if name == "" or ip == "" or port == "":
-                    if not error_loop("You must enter all fields!"):
-                        return None
-                    continue
-                if not port.isdigit():
-                    if not error_loop("Port must be a number!"):
-                        return None
-                    continue
-                port = int(port)
-                return self.add(name, ip, port)
+                if (datetime.now() - self.last_time).seconds > self.delay:
+                    self.last_time = datetime.now()
+                    server_info = self.socket_client.request_data()
+
+                    if self.last_server_info is None:
+                        self.last_server_info = server_info
+                        self.display_server_info(server_info, "Added")
+                    elif server_info != self.last_server_info:
+                        self.last_server_info = server_info
+                        self.display_server_info(server_info, "Updated")
+
+                self.points = (self.points + 1) % 6
+                print("Loading" + "." * self.points + "      ", end="\r")
+                sleep(1)
+
         except KeyboardInterrupt:
-            return None
-
-    def gui(self):
-        clear()
-        print()
-        print("{:=^50}".format(" Rust Ping Monitor "))
-        print()
-        for i in range(0, 8):
-            try:
-                print("{0}. {1}".format(i + 1, self.servers[i + (self.page * 8)]["name"]))
-            except IndexError:
-                break
-        print()
-        if self.page > 0:
-            print("-. Previous Page")
-        print("0. Add Server")
-        if self.page < len(self.servers) // 8:
-            print("+. Next Page")
-        print()
-        print("x. Exit")
-        print("Page {0}/{1}".format(self.page + 1, len(self.servers) // 8 + 1))
-        print()
-
-    def gui_selector(self):
-        selector = input("Select: ")
-        if selector == "0":
-            return self.add_server()
-        if selector == "-":
-            self.page -= 1
-            return None
-        if selector == "+":
-            self.page += 1
-            return None
-        if ignorecase_equals(selector, "x"):
-            exit()
-        if selector.isdigit():
-            try:
-                selector = int(selector)
-                if selector < 1 or selector > 8:
-                    raise IndexError()
-                return self.servers[int(selector) - 1 + (self.page * 8)]
-            except IndexError:
-                if not error_loop("Invalid Selection."):
-                    exit()
-                return None
-        if not error_loop("Invalid Selection."):
-            exit()
-        return None
-
-    def gui_loop(self):
-        try:
-            chosen = None
-            while chosen is None:
-                if len(self.servers) == 0:
-                    chosen = self.add_server()
-                    if chosen is None:
-                        exit()
-                self.gui()
-                chosen = self.gui_selector()
-            return chosen
-        except KeyboardInterrupt:
-            print()
+            print("\nExiting...")
+            sys.exit()
+        except Exception as e:
+            print(f"An error has occurred: {e}")
             print("Exiting...")
-            exit()
-
-    def get_delay(self):
-        while True:
-            delay = input("Enter delay in seconds (default 10): ")
-            if delay == "":
-                return 10
-            elif not delay.isdigit():
-                if not error_loop("Invalid input."):
-                    exit()
-                continue
-            elif int(delay) < 1:
-                if not error_loop("Invalid input."):
-                    exit()
-                continue
-            return int(delay)
-
-def main():
-    pager = Pager()
-    selected_server = pager.gui_loop()
-    delay = pager.get_delay()
-    socket_client = SocketClient(selected_server["ip"], selected_server["port"])
-    last_server_info = None
-    last_time = datetime.now()
-    points = 0
-    clear()
-    try:        
-        while True:
-            if (datetime.now() - last_time).seconds > delay:
-                last_time = datetime.now()
-                server_info = socket_client.request_data()
-                if last_server_info is None:
-                    last_server_info = server_info
-                    ts = datetime.now().strftime("%H:%M:%S")
-                    
-                    print(f"[{ts}] Added server:")
-                    print(f"   Name: {server_info.name}")
-                    print(f"   Map Generator: {server_info.map_generator}")
-                    print(f"   Map Age: {server_info.get_formatted_age()}")
-                    print(f"   Players: {server_info.current_players}/{server_info.max_players}")
-                    print()
-                elif server_info != last_server_info:
-                    last_server_info = server_info
-                    ts = datetime.now().strftime("%H:%M:%S")
-                    print(f"[{ts}] Server updated:")
-                    print(f"   Players: {server_info.current_players}/{server_info.max_players}")
-                    print()
-            sleep(1)
-            points = (points + 1) % 6
-            print("Loading" + "." * points + "      ", end="\r")
-    except KeyboardInterrupt:
-        print("Exiting...       ")
-        exit()
-    except Exception as e:
-        print("An error has occurred: " + str(e))
-        print("Exiting...")
-        exit()
+            sys.exit()
 
 if __name__ == "__main__":
-    main()
+    server_monitor = ServerMonitor()
+    server_monitor.run()
